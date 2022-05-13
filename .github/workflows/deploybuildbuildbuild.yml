@@ -1,0 +1,75 @@
+name: Release Jar
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        default: 'touhidurrr'
+        required: true
+      branch:
+        default: 'master'
+        required: true
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '11'
+
+      - uses: actions/checkout@v3
+        with:
+          repository: ${{ github.event.inputs.owner }}/Unciv
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Cache multiple paths
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle
+            **/gradle
+          key: ${{ github.event.inputs.owner }}-${{ github.event.inputs.branch }}
+
+      - name: Compile kotlin and build classes
+        run: ./gradlew classes
+
+      - name: Build Apk
+        run: |
+          ./gradlew :android:bundleRelease
+          ./gradlew :android:assembleRelease
+          mv android/build/outputs/apk/release/Unciv-release-unsigned.apk deploy/Unciv.jar
+
+      - name: Build Zips and Jars
+        run: |
+          wget -q -O packr-all-4.0.0.jar https://github.com/libgdx/packr/releases/download/4.0.0/packr-all-4.0.0.jar
+
+          wget -q -O jre-linux-64.tar.gz https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.11%2B9/OpenJDK11U-jre_x64_linux_hotspot_11.0.11_9.tar.gz
+          ./gradlew desktop:packrLinux64
+          ./gradlew desktop:zipLinuxFilesForJar
+
+          wget -q -O jdk-windows-32.zip https://github.com/ojdkbuild/ojdkbuild/releases/download/java-1.8.0-openjdk-1.8.0.252-2.b09-x86/java-1.8.0-openjdk-1.8.0.252-2.b09.ojdkbuild.windows.x86.zip
+          ./gradlew desktop:packrWindows32
+
+          wget -q -O jdk-windows-64.zip https://github.com/ojdkbuild/ojdkbuild/releases/download/java-1.8.0-openjdk-1.8.0.232-1.b09/java-1.8.0-openjdk-1.8.0.232-1.b09.ojdkbuild.windows.x86_64.zip
+          ./gradlew desktop:packrWindows64
+
+          mv desktop/build/libs/Unciv.jar deploy/Unciv.jar
+
+      - name: Build UncivServer.jar
+        run: |
+          ./gradlew server:dist
+          mv server/build/libs/UncivServer.jar deploy/UncivServer.jar
+
+      - name: Set Release Tag
+        run: echo "TAG=$(date -u +%s%N)" >> $GITHUB_ENV
+
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.TAG }}
+          artifacts: "deploy/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
